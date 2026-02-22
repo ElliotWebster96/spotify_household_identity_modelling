@@ -1,0 +1,62 @@
+import pandas as pd
+import glob
+import json
+import os
+
+# 1. Setup paths to find all your listening history files
+path_pattern = './High Grade - Bronze/*Streaming*History*.json'
+output_file = 'spotify_master_dataset.csv'
+
+print("--- Starting Data Ingestion ---")
+
+# 2. Gather all matching files
+files = glob.glob(path_pattern)
+if not files:
+    print("Error: No streaming history files found in 'High Grade - Bronze'. Check your folder names!")
+    exit()
+
+all_data = []
+
+# 3. Loop through files and load data
+for file in files:
+    print(f"Reading: {os.path.basename(file)}")
+    with open(file, 'r', encoding='utf-8') as f:
+        try:
+            data = json.load(f)
+            if isinstance(data, list):
+                all_data.extend(data)
+            else:
+                all_data.append(data)
+        except Exception as e:
+            print(f"Could not read {file}: {e}")
+
+# 4. Create a unified Table (DataFrame)
+df = pd.DataFrame(all_data)
+
+# 5. Handle different Spotify schemas (Standard vs Extended)
+if 'ts' in df.columns:
+    df['timestamp'] = pd.to_datetime(df['ts'])
+elif 'endTime' in df.columns:
+    df['timestamp'] = pd.to_datetime(df['endTime'])
+
+if 'ms_played' in df.columns:
+    df['minutes_played'] = df['ms_played'] / 60000
+elif 'msPlayed' in df.columns:
+    df['minutes_played'] = df['msPlayed'] / 60000
+
+# 6. Create Time-based Features for Persona Detection
+if 'timestamp' in df.columns:
+    df['hour'] = df['timestamp'].dt.hour
+    df['day_of_week'] = df['timestamp'].dt.day_name()
+    df['is_weekend'] = df['timestamp'].dt.dayofweek >= 5
+
+# 7. Final Clean-up
+cols_to_keep = ['timestamp', 'artistName', 'trackName', 'minutes_played', 'hour', 'day_of_week', 'is_weekend', 'platform', 'conn_country']
+final_df = df[[c for c in cols_to_keep if c in df.columns]]
+
+# 8. Save to CSV
+final_df.to_csv(output_file, index=False)
+
+print(f"\n--- SUCCESS! ---")
+print(f"Total Rows Processed: {len(final_df):,}")
+print(f"File saved as: {output_file}")
